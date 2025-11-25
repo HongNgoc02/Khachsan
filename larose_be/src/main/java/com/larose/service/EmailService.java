@@ -617,9 +617,6 @@ public class EmailService {
                             <p style="color: #666; font-size: 12px; margin-top: 5px;">Ngày tạo: <strong>%s</strong></p>
                         </div>
                         
-                        <div style="text-align: center; margin: 20px 0;">
-                            <a href="%s" style="display: inline-block; padding: 12px 30px; background: #5ee7df; color: white; text-decoration: none; border-radius: 5px;">Xem Trang Chủ</a>
-                        </div>
                         
                         <p>Chúng tôi rất mong được đón tiếp bạn!</p>
                     </div>

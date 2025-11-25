@@ -247,143 +247,22 @@ const AdminDashboard = () => {
   const exportToExcel = async () => {
     try {
       setExporting(true);
-      // Lấy dữ liệu chi tiết
-      // Lấy transactions với status = success và filter theo khoảng thời gian từ backend
-      const [roomsRes, bookingsRes, transactionsRes] = await Promise.all([
-        roomService.getAllRooms({ page: 0, size: 10000 }),
-        bookingService.getAllBookings({ page: 0, size: 10000 }),
-        bookingService.getAllTransactions({ 
-          page: 0, 
-          size: 10000, 
-          status: 'success',
-          startDate: startDate,
-          endDate: endDate
-        })
-      ]);
-
+      
+      // Sử dụng dữ liệu đã có sẵn từ Dashboard thay vì fetch lại
+      // Dữ liệu này đã được tính toán đúng từ statisticalService
+      
+      // Lấy thêm chi tiết phòng nếu cần
+      const roomsRes = await roomService.getAllRooms({ page: 0, size: 10000 });
       const rooms = roomsRes?.content || roomsRes?.data || roomsRes || [];
-      const bookings = bookingsRes?.content || bookingsRes?.data || bookingsRes || [];
-      // Transactions đã được filter theo khoảng thời gian từ backend
-      const transactions = transactionsRes?.content || transactionsRes?.data || transactionsRes || [];
 
-      // Sử dụng startDate và endDate từ date picker (để so sánh nếu cần)
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-
-      // Tạo map bookingId -> roomId để tra cứu nhanh
-      const bookingIdToRoomMap = new Map();
-      bookings.forEach(booking => {
-        // Tìm room match với booking này
-        const matchedRoom = rooms.find(room => {
-          // So sánh roomCode (phổ biến nhất)
-          if (booking.roomCode && room.code && booking.roomCode === room.code) return true;
-          // So sánh roomId
-          if (booking.roomId && room.id && booking.roomId === room.id) return true;
-          // So sánh roomNumber
-          if (booking.roomNumber && room.number && booking.roomNumber === room.number) return true;
-          // So sánh roomCode với room number
-          if (booking.roomCode && room.number && booking.roomCode === room.number) return true;
-          return false;
-        });
-        
-        if (matchedRoom && booking.id) {
-          bookingIdToRoomMap.set(booking.id, matchedRoom.id);
-        }
-      });
-
-      // Tính toán doanh thu và trạng thái cho từng phòng
-      const roomDetails = rooms.map(room => {
-        // Match booking với room - thử nhiều cách
-        const allRoomBookings = bookings.filter(booking => {
-          // So sánh roomCode (phổ biến nhất)
-          if (booking.roomCode && room.code && booking.roomCode === room.code) return true;
-          // So sánh roomId
-          if (booking.roomId && room.id && booking.roomId === room.id) return true;
-          // So sánh roomNumber
-          if (booking.roomNumber && room.number && booking.roomNumber === room.number) return true;
-          // So sánh roomCode với room number
-          if (booking.roomCode && room.number && booking.roomCode === room.number) return true;
-          return false;
-        });
-
-        // Lấy danh sách booking IDs của phòng này (tất cả bookings)
-        const allRoomBookingIds = allRoomBookings.map(b => b.id);
-        
-        // Lọc booking đã trả phòng (checked_out) trong khoảng thời gian
-        // Chỉ tính booking đã checked_out (đã trả phòng)
-        const checkedOutBookingsInRange = allRoomBookings.filter(booking => {
-          // Chỉ lấy booking đã trả phòng
-          if (booking.status !== 'checked_out') return false;
-          
-          if (!booking.checkOut) return false;
-          
-          const checkOutDate = new Date(booking.checkOut);
-          checkOutDate.setHours(0, 0, 0, 0);
-          
-          // Kiểm tra ngày trả phòng có trong khoảng thời gian không
-          const isInRange = checkOutDate >= start && checkOutDate <= end;
-          
-          return isInRange;
-        });
-
-        // Lọc booking overlap với khoảng thời gian [startDate, endDate] để xác định trạng thái đặt phòng
-        // Overlap: check_in <= endDate AND check_out >= startDate
-        const roomBookingsInRange = allRoomBookings.filter(booking => {
-          // Loại bỏ cancelled và no_show
-          if (booking.status === 'cancelled' || booking.status === 'no_show') return false;
-          
-          if (!booking.checkIn || !booking.checkOut) return false;
-          
-          const checkInDate = new Date(booking.checkIn);
-          checkInDate.setHours(0, 0, 0, 0);
-          const checkOutDate = new Date(booking.checkOut);
-          checkOutDate.setHours(0, 0, 0, 0);
-          
-          // Kiểm tra overlap: check_in <= endDate AND check_out >= startDate
-          const hasOverlap = checkInDate <= end && checkOutDate >= start;
-          
-          return hasOverlap;
-        });
-
-        // Tính doanh thu từ các booking đã trả phòng
-        // Tách riêng: Doanh thu phòng và Doanh thu dịch vụ
-        let roomRevenue = 0;
-        let serviceRevenue = 0;
-        
-        checkedOutBookingsInRange.forEach(booking => {
-          // Tiền phòng
-          const roomPrice = parseFloat(booking.priceTotal || 0) || 0;
-          roomRevenue += roomPrice;
-          
-          // Tiền dịch vụ (từ bookingServices)
-          if (booking.bookingServices && Array.isArray(booking.bookingServices)) {
-            const servicePrice = booking.bookingServices.reduce((sum, service) => {
-              const total = parseFloat(service.totalPrice || 0) || 0;
-              return sum + total;
-            }, 0);
-            serviceRevenue += servicePrice;
-          }
-        });
-
-        // Kiểm tra trạng thái đặt phòng: có booking overlap với khoảng thời gian không
-        // Bao gồm cả booking active và đã checkout nếu overlap
-        const isBookedInRange = roomBookingsInRange.length > 0;
-
-        return {
-          code: room.code || room.number || 'N/A',
-          title: room.title || room.name || 'N/A',
-          type: room.type?.name || room.roomType?.name || room.typeName || 'N/A',
-          status: room.status || 'available',
-          price: room.price || 0,
-          isBooked: isBookedInRange,
-          bookingCount: roomBookingsInRange.length,
-          roomRevenue: roomRevenue,
-          serviceRevenue: serviceRevenue,
-          totalRevenue: roomRevenue + serviceRevenue
-        };
-      });
+      // Tạo danh sách phòng đơn giản cho Excel (không tính toán lại doanh thu)
+      const roomDetails = rooms.map(room => ({
+        code: room.code || room.number || 'N/A',
+        title: room.title || room.name || 'N/A',
+        type: room.type?.name || room.roomType?.name || room.typeName || 'N/A',
+        status: room.status || 'available',
+        price: room.price || 0
+      }));
 
       // Tạo workbook mới
       const wb = XLSX.utils.book_new();
@@ -627,12 +506,11 @@ const AdminDashboard = () => {
 
     XLSX.utils.book_append_sheet(wb, ws3, 'Tỷ lệ phòng');
 
-    // Sheet 4: Chi tiết từng phòng
+    // Sheet 4: Danh sách phòng
     const roomDetailData = [
-      [`CHI TIẾT TỪNG PHÒNG (${formatDate(startDate)} - ${formatDate(endDate)})`],
-      [`Thời gian: ${formatDate(startDate)} - ${formatDate(endDate)} (Chỉ tính booking đã trả phòng - checked_out)`],
+      [`DANH SÁCH PHÒNG`],
       [''],
-      ['Mã phòng', 'Tên phòng', 'Loại phòng', 'Trạng thái', 'Đã đặt', 'Số lượt đặt', 'Giá phòng (VNĐ)', 'Doanh thu phòng (VNĐ)', 'Doanh thu dịch vụ (VNĐ)', 'Tổng doanh thu (VNĐ)']
+      ['Mã phòng', 'Tên phòng', 'Loại phòng', 'Trạng thái', 'Giá phòng (VNĐ)']
     ];
 
     // Hàm chuyển đổi trạng thái phòng sang tiếng Việt
@@ -653,47 +531,9 @@ const AdminDashboard = () => {
         room.title,
         room.type,
         getRoomStatusInVietnamese(room.status),
-        room.isBooked ? 'Có' : 'Không',
-        room.bookingCount,
-        room.price,
-        room.roomRevenue,
-        room.serviceRevenue,
-        room.totalRevenue
+        room.price
       ]);
     });
-
-    // Tính tổng
-    const totalRoomRevenueOnly = roomDetails.reduce((sum, r) => sum + (r.roomRevenue || 0), 0);
-    const totalServiceRevenueOnly = roomDetails.reduce((sum, r) => sum + (r.serviceRevenue || 0), 0);
-    const totalAllRevenue = roomDetails.reduce((sum, r) => sum + (r.totalRevenue || 0), 0);
-    const totalBooked = roomDetails.filter(r => r.isBooked).length;
-    const totalBookings = roomDetails.reduce((sum, r) => sum + r.bookingCount, 0);
-    
-    // Log để debug
-    console.log('=== DEBUG DOANH THU ===');
-    console.log('Tổng doanh thu phòng:', totalRoomRevenueOnly);
-    console.log('Tổng doanh thu dịch vụ:', totalServiceRevenueOnly);
-    console.log('Tổng doanh thu (phòng + dịch vụ):', totalAllRevenue);
-    console.log('Tổng doanh thu từ transactions (tất cả từ backend):', totalRevenueFromTransactions);
-    console.log('Tổng doanh thu từ roomDetails (tổng các phòng):', totalRoomRevenue);
-    console.log('Tổng doanh thu từ stats (backend API):', stats.revenue);
-    console.log('Số bookings:', bookings.length);
-    console.log('Số rooms:', rooms.length);
-    console.log('========================');
-    
-    roomDetailData.push(['']);
-    roomDetailData.push([
-      'TỔNG CỘNG',
-      '',
-      '',
-      '',
-      `${totalBooked}/${roomDetails.length}`,
-      totalBookings,
-      '',
-      totalRoomRevenueOnly,
-      totalServiceRevenueOnly,
-      totalAllRevenue
-    ]);
 
     const ws4 = XLSX.utils.aoa_to_sheet(roomDetailData);
     ws4['!cols'] = [
@@ -701,69 +541,38 @@ const AdminDashboard = () => {
       { wch: 30 }, // Tên phòng
       { wch: 20 }, // Loại phòng
       { wch: 15 }, // Trạng thái
-      { wch: 12 }, // Đã đặt
-      { wch: 15 }, // Số lượt đặt
-      { wch: 20 }, // Giá phòng
-      { wch: 22 }, // Doanh thu phòng
-      { wch: 22 }, // Doanh thu dịch vụ
-      { wch: 22 }  // Tổng doanh thu
+      { wch: 20 }  // Giá phòng
     ];
     ws4['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } }
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }
     ];
 
     // Đặt chiều cao hàng
     ws4['!rows'] = [
       { hpt: 30 },
-      { hpt: 20 },
       { hpt: 10 },
       { hpt: 25 }
     ];
 
     // Style cho sheet 4
     applyStyle(ws4, 'A1', titleStyle);
-    applyStyle(ws4, 'A2', { font: { sz: 11, italic: true }, alignment: { horizontal: "center" } });
-    applyStyle(ws4, 'A4', headerStyle);
-    applyStyle(ws4, 'B4', headerStyle);
-    applyStyle(ws4, 'C4', headerStyle);
-    applyStyle(ws4, 'D4', headerStyle);
-    applyStyle(ws4, 'E4', headerStyle);
-    applyStyle(ws4, 'F4', headerStyle);
-    applyStyle(ws4, 'G4', headerStyle);
-    applyStyle(ws4, 'H4', headerStyle);
-    applyStyle(ws4, 'I4', headerStyle);
-    applyStyle(ws4, 'J4', headerStyle);
+    applyStyle(ws4, 'A3', headerStyle);
+    applyStyle(ws4, 'B3', headerStyle);
+    applyStyle(ws4, 'C3', headerStyle);
+    applyStyle(ws4, 'D3', headerStyle);
+    applyStyle(ws4, 'E3', headerStyle);
 
     // Style cho dữ liệu
     for (let i = 0; i < roomDetails.length; i++) {
-      const row = i + 5; // Bắt đầu từ hàng 5 (sau header ở hàng 4)
+      const row = i + 4; // Bắt đầu từ hàng 4 (sau header ở hàng 3)
       applyStyle(ws4, `A${row}`, { ...labelStyle, alignment: { horizontal: "center" } });
       applyStyle(ws4, `B${row}`, labelStyle);
       applyStyle(ws4, `C${row}`, labelStyle);
       applyStyle(ws4, `D${row}`, { ...labelStyle, alignment: { horizontal: "center" } });
-      applyStyle(ws4, `E${row}`, { ...labelStyle, alignment: { horizontal: "center" } });
-      applyStyle(ws4, `F${row}`, { ...valueStyle, numFmt: '#,##0' });
-      applyStyle(ws4, `G${row}`, { ...valueStyle, numFmt: '#,##0' });
-      applyStyle(ws4, `H${row}`, { ...valueStyle, numFmt: '#,##0' });
-      applyStyle(ws4, `I${row}`, { ...valueStyle, numFmt: '#,##0' });
-      applyStyle(ws4, `J${row}`, { ...valueStyle, numFmt: '#,##0' });
+      applyStyle(ws4, `E${row}`, { ...valueStyle, numFmt: '#,##0' });
     }
 
-    // Style cho dòng tổng
-    const totalRoomRow = 5 + roomDetails.length + 1;
-    applyStyle(ws4, `A${totalRoomRow}`, { ...totalStyle, alignment: { horizontal: "center" } });
-    applyStyle(ws4, `B${totalRoomRow}`, totalStyle);
-    applyStyle(ws4, `C${totalRoomRow}`, totalStyle);
-    applyStyle(ws4, `D${totalRoomRow}`, totalStyle);
-    applyStyle(ws4, `E${totalRoomRow}`, { ...totalStyle, alignment: { horizontal: "center" } });
-    applyStyle(ws4, `F${totalRoomRow}`, { ...totalStyle, numFmt: '#,##0' });
-    applyStyle(ws4, `G${totalRoomRow}`, totalStyle);
-    applyStyle(ws4, `H${totalRoomRow}`, { ...totalStyle, numFmt: '#,##0' });
-    applyStyle(ws4, `I${totalRoomRow}`, { ...totalStyle, numFmt: '#,##0' });
-    applyStyle(ws4, `J${totalRoomRow}`, { ...totalStyle, numFmt: '#,##0' });
-
-    XLSX.utils.book_append_sheet(wb, ws4, 'Chi tiết phòng');
+    XLSX.utils.book_append_sheet(wb, ws4, 'Danh sách phòng');
 
     // Xuất file với tên bao gồm khoảng thời gian
     const fileName = `BaoCaoThongKe_${startDate}_den_${endDate}.xlsx`;
@@ -953,7 +762,7 @@ const AdminDashboard = () => {
             </div>
           </div>
           
-        {/* <button
+        <button
           onClick={exportToExcel}
           disabled={exporting}
           className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-all duration-300 flex items-center gap-2 shadow-lg"
@@ -969,7 +778,7 @@ const AdminDashboard = () => {
               Xuất Excel
             </>
           )}
-        </button> */}
+        </button>
         
         <button
           onClick={calculateVATData}
